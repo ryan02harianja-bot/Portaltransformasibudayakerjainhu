@@ -72,6 +72,8 @@
   .barchart .gridlines{position:absolute; left:56px; right:0; top:0; bottom:34px;}
   .barchart .gridline{position:absolute; left:0; right:0; border-top:1px dashed var(--line);}
   .barchart .gridline span{position:absolute; left:-56px; top:-8px; width:48px; text-align:right; font-size:10.5px; color:var(--ink-soft);}
+  .baseline-line{position:absolute; left:0; right:0; border-top:2px dashed var(--gold); z-index:2;}
+  .baseline-label{position:absolute; right:0; top:-18px; font-size:10.5px; font-weight:700; color:var(--gold); background:var(--paper-card); padding:1px 6px; border-radius:4px; white-space:nowrap;}
   .bar-col{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; position:relative; z-index:1;}
   .bar-stack{width:100%; max-width:52px; height:236px; display:flex; flex-direction:column-reverse; border-radius:4px 4px 0 0; overflow:hidden;}
   .bar-seg{width:100%; transition:opacity .15s;}
@@ -182,7 +184,7 @@
         <p class="section-eyebrow">RINGKASAN</p>
         <h2 class="section-title">Tren Realisasi Belanja per Bulan</h2>
       </div>
-      <p class="section-note">Total gabungan enam kategori belanja efisiensi, dari seluruh Perangkat Daerah.</p>
+      <p class="section-note">Garis putus-putus emas adalah ambang batas realisasi bulan Maret sebagai pembanding bulan-bulan berikutnya.</p>
     </div>
     <div class="panel chart-grid">
       <div>
@@ -237,22 +239,23 @@
   <section id="rankingSection">
     <div class="section-head">
       <div>
-        <p class="section-eyebrow">PERINGKAT KESELURUHAN</p>
-        <h2 class="section-title">10 Perangkat Daerah dengan Realisasi Terbesar</h2>
+        <p class="section-eyebrow">KEBERHASILAN PENGHEMATAN</p>
+        <h2 class="section-title">Perangkat Daerah yang Berhasil Hemat</h2>
       </div>
-      <p class="section-note">Gabungan enam kategori belanja, Maret&ndash;Juli 2026.</p>
+      <p class="section-note">Realisasi Juli dibandingkan ambang batas Maret 2026, gabungan enam kategori belanja.</p>
     </div>
     <div class="panel">
+      <div class="cat-summary" id="savingsSummary" style="grid-template-columns:repeat(3,1fr);"></div>
       <div class="table-scroll">
         <table>
           <thead>
             <tr>
               <th style="width:36px;"></th>
               <th>Perangkat Daerah</th>
-              <th class="num">Realisasi Maret</th>
+              <th class="num">Baseline (Maret)</th>
               <th class="num">Realisasi Juli</th>
-              <th class="num">Total 5 Bulan</th>
-              <th class="num">Tren</th>
+              <th class="num">Penghematan (Rp)</th>
+              <th class="num">Penghematan (%)</th>
             </tr>
           </thead>
           <tbody id="rankTableBody"></tbody>
@@ -322,7 +325,8 @@ function renderKPI(){
 // ---------- CUSTOM STACKED BAR CHART (pure HTML/CSS) ----------
 function renderBarChart(){
   const months = DATA.months;
-  const maxTotal = Math.max(...DATA.grand_monthly, 1);
+  const baseline = DATA.grand_monthly[0]; // Maret = garis ambang batas
+  const maxTotal = Math.max(...DATA.grand_monthly, baseline, 1);
   // build 4 gridlines
   const steps = 4;
   let gridHtml = '';
@@ -330,6 +334,9 @@ function renderBarChart(){
     const frac = i/steps;
     gridHtml += `<div class="gridline" style="bottom:${frac*100}%"><span>${fmtRp(maxTotal*frac, true)}</span></div>`;
   }
+  // garis baseline Maret
+  const baselineFrac = baseline/maxTotal*100;
+  gridHtml += `<div class="baseline-line" style="bottom:${baselineFrac}%"><span class="baseline-label">Ambang batas &middot; Maret ${fmtRp(baseline, true)}</span></div>`;
 
   let colsHtml = '';
   months.forEach((m, mi)=>{
@@ -339,8 +346,12 @@ function renderBarChart(){
       const pct = (val/maxTotal*100);
       segsHtml += `<div class="bar-seg" title="${c.label} - ${m}: ${fmtRp(val)}" style="height:${pct}%; background:${CAT_COLORS[ci]};"></div>`;
     });
+    const monthTotal = DATA.grand_monthly[mi];
+    const vsBaseline = monthTotal - baseline;
+    const belowBaseline = vsBaseline <= 0;
+    const labelColor = mi===0 ? 'var(--teal-900)' : (belowBaseline ? 'var(--down)' : 'var(--up)');
     colsHtml += `<div class="bar-col">
-        <div class="bar-total-label">${fmtRp(DATA.grand_monthly[mi], true)}</div>
+        <div class="bar-total-label" style="color:${labelColor};">${fmtRp(monthTotal, true)}</div>
         <div class="bar-stack">${segsHtml}</div>
         <div class="bar-month-label">${m}</div>
       </div>`;
@@ -354,7 +365,7 @@ function renderBarChart(){
 
   document.getElementById('barLegend').innerHTML = DATA.categories.map((c,i)=>
     `<span class="chip"><span class="dot" style="background:${CAT_COLORS[i]}"></span>${c.icon} ${c.label}</span>`
-  ).join('');
+  ).join('') + `<span class="chip"><span class="dot" style="background:var(--gold); border-radius:1px; width:12px; height:2px;"></span>Ambang batas (Maret)</span>`;
 }
 
 // ---------- CUSTOM DONUT (pure CSS conic-gradient) ----------
@@ -484,17 +495,39 @@ function attachSearch(){
   });
 }
 
-// ---------- OVERALL RANKING ----------
+// ---------- PD YANG BERHASIL HEMAT (baseline = Maret) ----------
 function renderRanking(){
-  const top10 = DATA.pd_ranking.slice(0,10);
-  document.getElementById('rankTableBody').innerHTML = top10.map((p,i)=>`
+  const all = DATA.pd_ranking;
+  const hemat = all
+    .filter(p => p.juli < p.maret)
+    .map(p => {
+      const savingsRp = p.maret - p.juli;
+      const savingsPct = p.maret > 0 ? (savingsRp/p.maret*100) : 0;
+      return {...p, savingsRp, savingsPct};
+    })
+    .sort((a,b) => b.savingsRp - a.savingsRp);
+
+  const totalSavings = hemat.reduce((sum,p)=>sum+p.savingsRp, 0);
+
+  document.getElementById('savingsSummary').innerHTML = `
+    <div class="mini-stat"><div class="k">PD BERHASIL HEMAT</div><div class="v">${hemat.length} dari ${all.length} PD</div></div>
+    <div class="mini-stat"><div class="k">TOTAL PENGHEMATAN (vs Maret)</div><div class="v">${fmtRp(totalSavings, true)}</div></div>
+    <div class="mini-stat"><div class="k">RATA-RATA PENGHEMATAN</div><div class="v">${hemat.length? fmtRp(totalSavings/hemat.length, true) : 'Rp 0'}</div></div>
+  `;
+
+  if(hemat.length === 0){
+    document.getElementById('rankTableBody').innerHTML = `<tr><td colspan="6" class="empty-msg">Belum ada Perangkat Daerah dengan realisasi Juli di bawah baseline Maret.</td></tr>`;
+    return;
+  }
+
+  document.getElementById('rankTableBody').innerHTML = hemat.map((p,i)=>`
     <tr>
       <td><span class="rank-badge">${i+1}</span></td>
       <td class="name">${p.nama}</td>
       <td class="num">${fmtRp(p.maret)}</td>
       <td class="num">${fmtRp(p.juli)}</td>
-      <td class="num" style="font-weight:700;">${fmtRp(p.total)}</td>
-      <td class="num">${trendChip(p.maret, p.juli)}</td>
+      <td class="num" style="font-weight:700; color:var(--down);">${fmtRp(p.savingsRp)}</td>
+      <td class="num"><span class="trend-chip down">&#8595; ${p.savingsPct.toFixed(0)}%</span></td>
     </tr>`).join('');
 }
 
